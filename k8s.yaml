@@ -1,0 +1,134 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: subsonic
+  labels:
+    app: subsonic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: subsonic
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: subsonic
+        version: v0.0.2
+    spec:
+      containers:
+      - name: subsonic
+        image: eluminare/subsonic:latest
+        resources:
+          requests:
+            cpu: 500m
+            memory: 600Mi
+          limits:
+            cpu: 1500m
+            memory: 4000Mi
+        env:
+        - name: TZ
+          value: Europe/Berlin
+        - name: LANG
+          value: "en_US.UTF-8"
+        - name: LC_ALL
+          value: "en_US.UTF-8"
+        - name: LANGUAGE
+          value: "en_US:en"
+        - name: SUBSONIC_PORT
+          value: "4040"
+        - name: SUBSONIC_MAX_MEMORY
+          value: "2048"
+        ports:
+        - containerPort: 4040
+        volumeMounts:
+          - name: subsonic-pv
+            mountPath: /var/subsonic
+          - name: music-data
+            mountPath: /mnt/music #necessary to modify if your migrating from an already existing instance to match file paths in database
+      volumes:
+      - name: subsonic-pv
+        persistentVolumeClaim:
+          claimName: subsonic-pvc
+      - name: music-data
+        persistentVolumeClaim:
+          claimName: music-pvc
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: subsonic-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  nfs:
+    path: /mnt/S01/K3S/subsonic
+    server: 192.168.150.94
+  persistentVolumeReclaimPolicy: Retain
+  claimRef:
+    namespace: default
+    name: subsonic-pvc
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: subsonic-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: subsonic
+#  annotations:
+#    traefik.backend.circuitbreaker: "NetworkErrorRatio() > 0.5"
+spec:
+  ports:
+  - name: http
+    targetPort: 4040
+    port: 4040
+  selector:
+    app: subsonic
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: subsonic
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    certmanager.k8s.io/issuer: "certmanager-your-domain-here-example"
+    certmanager.k8s.io/acme-challenge-type: "dns01"
+    ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+  - host: your-address-here.example
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: subsonic
+          servicePort: http
+  tls:
+    - hosts:
+        - your-address-here.example
+      secretName: your-address-here.example
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: your-address-here.example-dns
+  namespace: default
+spec:
+  secretName: your-address-here.example-tls
+  issuerRef:
+    name: certmanager-your-domain-here-example
+  dnsNames:
+    - your-address-here.example
